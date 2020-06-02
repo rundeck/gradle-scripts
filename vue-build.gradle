@@ -1,0 +1,81 @@
+ext.spaBuildDir = "$buildDir/spa"
+
+task npmCI(type: NpmTask, group: 'Node') {
+    dependsOn 'npmCISwitch'
+
+    enabled = false
+
+    inputs.file(file("${projectDir}/package.json"))
+    inputs.file(file("${projectDir}/package-lock.json"))
+
+    outputs.dir(file("${projectDir}/node_modules"))
+
+    args = ['ci']
+}
+
+task npmCISwitch {
+    inputs.file(file("${projectDir}/package.json"))
+    inputs.file(file("${projectDir}/package-lock.json"))
+    inputs.dir "src"
+    if(file("build").isDirectory()){
+        inputs.dir "build"
+    }
+    if(file("config").isDirectory()) {
+        inputs.dir "config"
+    }
+
+    outputs.file "${buildDir}/switch"
+
+    outputs.cacheIf {true}
+    doLast {
+        tasks.npmCI.enabled = true
+    }
+}
+gradle.taskGraph.whenReady { taskGraph ->
+    def groups = taskGraph.getAllTasks().collect { it.group }
+    if (groups.contains('test'))
+        tasks.npmCI.enabled = true
+}
+
+task runNpmBuild(type: NpmTask, group: 'build') {
+    inputs.file 'package.json'
+    inputs.file 'package-lock.json'
+    inputs.dir 'src'
+
+    outputs.dir(file("$spaBuildDir"))
+    outputs.cacheIf { true }
+
+    args = ['run', 'build:ci']
+}
+assemble.dependsOn runNpmBuild
+
+task runNpmTest(type: NpmTask, group: 'test') {
+    dependsOn npmCI
+
+    inputs.file 'package.json'
+    inputs.file 'package-lock.json'
+    if(file("build").isDirectory()){
+        inputs.dir "build"
+    }
+    if(file("config").isDirectory()) {
+        inputs.dir "config"
+    }
+    inputs.dir 'src'
+
+    args = ['run', 'test:unit']
+}
+check.dependsOn runNpmTest
+
+//can package spa contents into a zip
+task packageSpa(type: Zip, group: 'build') {
+    dependsOn runNpmBuild
+    inputs.dir file(spaBuildDir)
+    version = project.version
+
+    from file(spaBuildDir)
+    include '**/*.js', '**/*.css', '**/*.map', '**/*.png', '**/*.jpg'
+}
+
+artifacts {
+    archives file: file(spaBuildDir), name: "${project.name}", type: 'directory', builtBy: runNpmBuild
+}
